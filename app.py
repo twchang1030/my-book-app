@@ -328,22 +328,53 @@ with tab1:
             df["任教年段"].apply(lambda v: grade_match(v, sel_grade))
         ]
 
-        st.caption(f"符合「{sel_grade}｜{sel_subj}」共 **{len(matched)}** 位老師")
+        # ── groupby 合併：同一老師的多列合併為一張卡片 ──
+        # 策略：以【老師姓名】為 key，彙整所有任教班級並去重排序；
+        #       兼任職務、特殊身分備註、教科書版本取同名中最常出現的非空值。
+        def merge_teachers(group_df: pd.DataFrame) -> pd.Series:
+            def most_common_nonempty(series):
+                vals = [v for v in series if v and v != "-"]
+                return vals[0] if vals else "—"
+
+            # 拆解每列的班級字串 → 合併去重 → 數字排序
+            all_cls: list[str] = []
+            for cell in group_df["任教班級"]:
+                for c in str(cell).replace("，", ",").split(","):
+                    c = c.strip()
+                    if c and c != "-":
+                        all_cls.append(c)
+            # 嘗試數字排序（如 101 < 201），無法轉換的保留原字串排序
+            def sort_key(s):
+                try:
+                    return (0, int(s))
+                except ValueError:
+                    return (1, s)
+            merged_cls = ", ".join(sorted(set(all_cls), key=sort_key))
+
+            return pd.Series({
+                "兼任職務":   most_common_nonempty(group_df["兼任職務"]),
+                "特殊身分備註": most_common_nonempty(group_df["特殊身分備註"]),
+                "教科書版本":  most_common_nonempty(group_df["教科書版本"]),
+                "任教班級_合併": merged_cls or "—",
+            })
 
         if matched.empty:
             st.info("查無符合的老師，請確認 Excel 資料或切換條件。")
         else:
-            for _, row in matched.iterrows():
-                sp    = safe_str(row.get("特殊身分備註", ""))
-                duty  = safe_str(row.get("兼任職務", ""))
-                bh    = badge_html(sp) if sp else ""
-                ver   = safe_str(row.get("教科書版本", ""))
-                classes = safe_str(row.get("任教班級", ""))
+            merged = matched.groupby("老師姓名", sort=False).apply(merge_teachers).reset_index()
+            st.caption(f"符合「{sel_grade}｜{sel_subj}」共 **{len(merged)}** 位老師")
+
+            for _, row in merged.iterrows():
+                sp      = safe_str(row.get("特殊身分備註", ""))
+                duty    = safe_str(row.get("兼任職務", ""))
+                bh      = badge_html(sp) if sp and sp != "—" else ""
+                ver     = safe_str(row.get("教科書版本", ""))
+                classes = safe_str(row.get("任教班級_合併", ""))
                 st.markdown(f"""
                 <div class="teacher-card">
                   <div class="name">{safe_str(row['老師姓名'])}{bh}</div>
                   <div class="meta">
-                    兼任職務：{duty or '—'} ｜ 任教班級：{classes or '—'} ｜ 版本：{ver or '—'}
+                    兼任職務：{duty} ｜ 任教班級：{classes} ｜ 版本：{ver}
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
