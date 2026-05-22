@@ -211,8 +211,11 @@ def load_excel(file_bytes: bytes, file_name: str) -> pd.DataFrame | None:
     df = df.fillna("").astype(str)
     # astype(str) 會把 nan 轉成 'nan' 字串，再清掉
     df = df.replace({"nan": "", "NaN": "", "None": ""})
-    # 去除所有儲存格首尾空白
+    # 去除所有儲存格首尾空白（雙保險：先全欄，再對關鍵比對欄位單獨處理）
     df = df.apply(lambda col: col.str.strip())
+    # 明確對「學校名稱」「學年度學期」做額外 strip，防止隱藏空白字元
+    df["學校名稱"]   = df["學校名稱"].str.strip()
+    df["學年度學期"] = df["學年度學期"].str.strip()
 
     # 班級人數整數欄（供計算用）
     def to_int(v: str) -> int:
@@ -250,8 +253,8 @@ with st.sidebar:
     st.markdown("## ⚙️ 全域切換")
 
     if df_raw is not None:
-        school_options   = sorted(df_raw["學校名稱"].unique().tolist())
-        semester_options = sorted(df_raw["學年度學期"].unique().tolist())
+        school_options   = sorted(set(df_raw["學校名稱"].str.strip().unique().tolist()))
+        semester_options = sorted(set(df_raw["學年度學期"].str.strip().unique().tolist()))
     else:
         school_options   = ["（請先上傳 Excel）"]
         semester_options = ["（請先上傳 Excel）"]
@@ -300,9 +303,12 @@ if df_raw is None:
     st.stop()
 
 # ── 依全域選單過濾出當前學校 + 學期的資料 ──
+# 過濾時兩邊都 strip，徹底防止隱藏空白導致比對失敗
+_school_clean   = sel_school.strip()
+_semester_clean = sel_semester.strip()
 df: pd.DataFrame = df_raw[
-    (df_raw["學校名稱"] == sel_school) &
-    (df_raw["學年度學期"] == sel_semester)
+    (df_raw["學校名稱"].str.strip() == _school_clean) &
+    (df_raw["學年度學期"].str.strip() == _semester_clean)
 ].copy()
 
 if df.empty:
